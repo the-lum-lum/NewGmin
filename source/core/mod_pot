@@ -1,0 +1,1211 @@
+!MODULE PFWetting3D
+MODULE potential
+  use global_variables
+  implicit none
+  DOUBLE PRECISION, ALLOCATABLE :: PHI(:,:,:)
+  DOUBLE PRECISION AREA, VOLUME, DROPVOL
+  DOUBLE PRECISION, ALLOCATABLE :: WetEnergy(:), ConAngle(:)
+  DOUBLE PRECISION, ALLOCATABLE :: DGRADSQPHI(:,:,:,:)
+  DOUBLE PRECISION, ALLOCATABLE ::  AREAPHI(:)
+  INTEGER :: DROPNODES
+
+  ! Functions to override 
+  logical, parameter :: run_init = .true.
+  logical, parameter :: perturb_coordinates_override = .false.
+  
+  ! Declare model globals here.
+  ! This replaces the commons file.
+
+  DOUBLE PRECISION ::  PFCA1, PFCA2
+
+  INTEGER SURFNODES, WIDTH, NPOSTX, NPOSTY, PHEIGHT
+  DOUBLE PRECISION :: ASPR, PFCA3, PFCA4, PFCA5, PFCA6
+  DOUBLE PRECISION POSTFRACX, POSTFRACY
+  INTEGER, ALLOCATABLE :: SURFLIST(:,:), NODESTATE(:,:,:), NORMLIST(:,:)
+  DOUBLE PRECISION, ALLOCATABLE :: WEIGHTLIST(:), WETCONTACT(:)
+  INTEGER :: GRIDX, GRIDY, GRIDZ
+  DOUBLE PRECISION CM1, CM2, CM3, CM4, CM5, VOLCONST, PFepsilon, PFGRIDSIZE
+  DOUBLE PRECISION, ALLOCATABLE :: WEIGHT(:)
+
+  DOUBLE PRECISION, ALLOCATABLE, DIMENSION(:,:) :: COORDS,COORDSO
+  INTEGER MCSTEPS(3), ISTEP
+CONTAINS
+  !Compute the energy, energy derivatives and gradient (if called for)
+  subroutine calc_energy_gradient()
+    implicit none
+    ! Wrapper to phase field model 
+    call PFWetting(X, G, E, .true.)
+  end subroutine
+  
+  subroutine init()
+    ! Wrapped for code that needs to be called
+    write(*,*) "InitWetting"
+    call INIPFWetting()
+    write(*,*) "InitWetting end"
+  end subroutine
+
+  subroutine perturb_coordinates()
+    ! Wrapper 
+    IMPLICIT NONE
+    INTEGER J1, J2, J3, Cur, Cur2
+    INTEGER JP, SHIFT, RANX, RANY
+    DOUBLE PRECISION PI, DPRAND, COORDS0(GRIDX*GRIDY*GRIDZ,1), &
+      COORDS2(GRIDX*GRIDY*GRIDZ,1), COORDS3(GRIDX*GRIDY*GRIDZ,1), &
+      COORDS4(GRIDX*GRIDY*GRIDZ,1)
+    !DPRAND is a double-precision random number
+
+    OPEN(35, FILE = 'coords')
+    READ(35, *) COORDS0
+    CLOSE(35)
+
+    JP = 4
+
+    COORDS2 = COORDS !COORDS2 is initialised with the same phi 3d array as COORDS
+
+    !Make a random number that is 1/10 the size of the grid
+    SHIFT = GRIDX /3
+    RANX = INT( (DPRAND()-0.50D0)*SHIFT )
+
+    !If the move is in the positive x-direction:
+
+    IF (RANX > 0) THEN
+      DO J1 = 1, GRIDX-RANX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1+RANX)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP) !The phi's of the shifted elements is transfered to COORDS2
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = GRIDX-RANX+1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1+RANX-GRIDX)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ELSE
+      DO J1 = -RANX+1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1+RANX-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, -RANX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1+RANX+GRIDX-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ENDIF
+
+    SHIFT = GRIDY / 3
+    RANY = INT( (DPRAND()-0.50D0)*SHIFT )
+
+    IF (RANY > 0) THEN
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY-RANY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1+RANY)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = GRIDY-RANY+1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1+RANY-GRIDY)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ELSE
+      DO J1 = 1, GRIDX
+      DO J2 = -RANY+1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2+RANY-1)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = 1, -RANY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2+RANY+GRIDY-1)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ENDIF
+    !This will alternatiely shift the origonal input drop up and down based on the step-number ISTEP
+
+    IF (ISTEP <= INT(MCSTEPS(1)/2)) THEN
+      SHIFT = 0
+    ELSE
+      SHIFT = 10
+    ENDIF
+    IF (SHIFT > 0) THEN
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ - SHIFT
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 + SHIFT
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = GRIDZ-SHIFT+1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 - GRIDZ + SHIFT
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ELSE
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = -SHIFT+1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 + SHIFT
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, -SHIFT
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 + SHIFT + GRIDZ
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ENDIF
+
+    COORDS2 = COORDS4
+    COORDS = COORDS2
+    X = COORDS(:,1)
+
+    PRINT *, 'STEP ', ISTEP, ' TAKEN   DROPNODES = ', DROPNODES
+    OPEN (17, FILE = 'outputdata')
+    WRITE(17, *) VOLUME, DROPVOL, DROPNODES, AREA
+
+    OPEN(40, FILE= 'STEPCONFIG')
+    WRITE(40, '(3F14.10)') COORDS2
+    !STOP
+
+  end subroutine perturb_coordinates
+
+  Subroutine PFWetting(COORDS2,V,E1,GTEST)
+    IMPLICIT NONE
+    LOGICAL GTEST
+    INTEGER J1, J2, J3, Cur, S1, S2
+    DOUBLE PRECISION COORDS2(N), V(N), E1, E2
+    DOUBLE PRECISION V3(N), V4(N)
+    DOUBLE PRECISION Area1, Vol1
+
+    E1 = 0.0
+    Volume = 0.0D0
+    Area = 0.0D0
+    DROPVOL = 0.0D0
+    DROPNODES = 0
+
+    DGRADSQPHI(:,:,:,:) = 0.0D0
+    AREAPHI(:) = 0.0D0
+
+
+
+    !Loop over the grid to fill the 3d array PHI with the phi values input as the 1D array COORDS2
+    DO J1 = 1, GRIDX
+    DO J2 = 1, GRIDY
+    DO J3 = 1, GRIDZ
+    Cur = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 !Assign each point in 3D to an element in the 1D array PHI
+    PHI(J1,J2,J3) = COORDS2(Cur) !Fill PHI with the phi values at each point input into the function
+    IF (NODESTATE(J1,J2,J3) ==-1) THEN
+      PHI(J1,J2,J3) = 0
+      COORDS2(CUR) = 0
+    ENDIF
+    ENDDO
+    ENDDO
+    ENDDO
+
+
+    CALL COMPUTEENERGY()
+
+    !This subroutine(see below) actually calculates the area and volume of the droplet
+    !Note that the area is equivalent to the free energy of the liquid drop in reduced units (neglecting solid surface energy)
+    !The second term is the energy penalty for changing the volume of the fluid
+    E1 =  Area + CM2 *(Volume-VOLCONST)**2
+
+
+    CALL COMPUTEDERIVATIVES()
+
+    IF (GTEST) THEN
+      V(:) = 0.0D0
+      CALL COMPUTEGRAD(V3, V4, V)
+      V = V * CM1
+    ENDIF
+
+    E1 = E1 * CM1
+
+    !open(50, file = 'weights3')
+    !write(50,*) nodestate(6,6,7), normlist(:,835), surflist(:,835), weightlist(835), wetcontact(835), phi(6,6,7), E1
+    !stop
+
+    RETURN
+  END SUBROUTINE PFWETTING
+
+  !Compute the bulk free energy density arising from the presence of two fluids
+  SUBROUTINE COMPUTEENERGY()
+    IMPLICIT NONE !Make sure only variables defined in this subroutine are accepted (or those defined in commons)
+    INTEGER J1, J2, J3, J1P, J1M, J2M, J2P, Cur, S1 ! Looping indices
+    DOUBLE PRECISION GRADSQPHI(GRIDX,GRIDY,GRIDZ) ! Make a 3d array to store the (gradient of phi)^2 at each point
+    DOUBLE PRECISION :: norm(3) !The normal vector to the surface at each point
+
+
+    GRADSQPHI(:,:,:) = 0.0D0 !Initialise the array with zeros
+    AREAPHI(:) = 0.0D0 !Initialise the array with zeros
+    Volume = 0.0D0 !Initial the droplet volume
+    Area = 0.0D0 !Initialise the droplet area
+
+    DO J1 = 1, GRIDX
+    DO J2 = 1, GRIDY
+    DO J3 = 1, GRIDZ
+
+    Cur = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+
+    !Start by computing GRADSQPHI for all bulk nodes
+    IF (nodestate(J1, J2, J3) == 0) THEN
+
+      IF (J1 .EQ. GRIDX) THEN
+        GRADSQPHI(J1,J2,J3) =  ((PHI(1,J2,J3) - PHI(J1,J2,J3))**2  + (PHI(J1-1,J2,J3)-PHI(J1,J2,J3))**2)/2.0D0
+      ELSEIF (J1 .EQ. 1) THEN
+        GRADSQPHI(J1,J2,J3) =  ((PHI(J1+1,J2,J3) - PHI(J1,J2,J3))**2  + (PHI(GRIDX,J2,J3)-PHI(J1,J2,J3))**2)/2.0D0
+      ELSE
+        GRADSQPHI(J1,J2,J3) =  ((PHI(J1+1,J2,J3) - PHI(J1,J2,J3))**2  + (PHI(J1-1,J2,J3)-PHI(J1,J2,J3))**2)/2.0D0
+      END IF
+
+
+      IF (J2 .EQ. GRIDY) THEN
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,1,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,J2-1,J3)-PHI(J1,J2,J3))**2)/2.0D0
+      ELSEIF (J2 .EQ. 1) THEN
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2+1,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,GRIDY,J3)-PHI(J1,J2,J3))**2)/2.0D0
+      ELSE
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2+1,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,J2-1,J3)-PHI(J1,J2,J3))**2)/2.0D0
+      END IF
+
+
+      IF (J3 .EQ. GRIDZ) THEN
+        !GRADSQPHI(J1,J2,J3) =  0 !The nodes below the surface in the z-direction should not interact with the top of the cell
+      ELSEIF (J3 .EQ. 1) THEN
+        !GRADSQPHI(J1,J2,J3) =  0 !The nodes below the surface in the z-direction should not interact with the top of the cell
+      ELSE
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2,J3+1) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,J2,J3-1)-PHI(J1,J2,J3))**2)/2.0D0
+      END IF
+
+
+      !Otherwise calculate GRADSQPHI for all surface nodes
+    ELSEIF (nodestate(J1, J2, J3) > 0) THEN
+      norm = normlist(:,nodestate(J1, J2, J3))
+
+      IF (norm(1) == 0) THEN
+        IF (J1 .EQ. GRIDX) THEN
+          GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) + ((PHI(1,J2,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1-1,J2,J3)-PHI(J1,J2,J3))**2)/2.0D0
+        ELSEIF (J1 .EQ. 1) THEN
+          GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) + ((PHI(J1+1,J2,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(GRIDX,J2,J3)-PHI(J1,J2,J3))**2)/2.0D0
+        ELSE
+          GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) + ((PHI(J1+1,J2,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1-1,J2,J3)-PHI(J1,J2,J3))**2)/2.0D0
+        END IF
+
+      ELSE
+        !GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) + SQRT(norm(1)**2+norm(2)**2+norm(3)**2)*WetEnergy(Cur)**2 / PFepsilon**2
+      ENDIF
+
+      IF (norm(2) == 0) THEN
+        IF (J2 .EQ. GRIDY) THEN
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,1,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,J2-1,J3)-PHI(J1,J2,J3))**2)/2.0D0
+        ELSEIF (J2 .EQ. 1) THEN
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2+1,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,GRIDY,J3)-PHI(J1,J2,J3))**2)/2.0D0
+        ELSE
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2+1,J3) - PHI(J1,J2,J3))**2  &
+            + (PHI(J1,J2-1,J3)-PHI(J1,J2,J3))**2)/2.0D0
+        END IF
+
+      ELSE
+        !GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) + SQRT(norm(1)**2+norm(2)**2+norm(3)**2)*WetEnergy(Cur)**2 / PFepsilon**2
+      ENDIF
+
+      IF (norm(3) == 0) THEN
+        IF (J3 .EQ. GRIDZ) THEN
+          !GRADSQPHI(J1,J2,J3) =  0 !The nodes below the surface in the z-direction should not interact with the top of the cell
+        ELSEIF (J3 .EQ. 1) THEN
+          !GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2,J3+1) - PHI(J1,J2,J3))**2  + (PHI(J1,J2,GRIDZ)-PHI(J1,J2,J3))**2)/2.0D0
+        ELSE
+          GRADSQPHI(J1,J2,J3) =  GRADSQPHI(J1,J2,J3) + ((PHI(J1,J2,J3+1) - PHI(J1,J2,J3))**2  + &
+            (PHI(J1,J2,J3-1)-PHI(J1,J2,J3))**2)/2.0D0
+        END IF
+
+      ELSE
+        !GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) + SQRT(norm(1)**2+norm(2)**2+norm(3)**2)*WetEnergy(Cur)**2 / PFepsilon**2
+      ENDIF
+
+    ENDIF
+
+    IF (nodestate(J1,J2,J3) >= 0 ) THEN
+      GRADSQPHI(J1,J2,J3) = GRADSQPHI(J1,J2,J3) / PFGRIDSIZE**2
+      AREAPHI(Cur) = (PFepsilon / 2.0D0 * GRADSQPHI(J1,J2,J3) + (PHI(J1,J2,J3)**2-1.0D0)**2/4.0D0/PFepsilon)
+
+      Volume = Volume + WEIGHT(Cur) * PHI(J1,J2,J3)
+      Area = Area + WEIGHT(Cur) * AREAPHI(Cur)
+
+      IF (phi(J1,J2,J3) >= 0) THEN
+        DROPVOL = DROPVOL + WEIGHT(Cur) * PHI(J1,J2,J3)
+        DROPNODES = DROPNODES + 1
+      ENDIF
+
+      IF ((nodestate(J1, J2, J3) > 0) .OR. (J3 == GRIDZ)) THEN
+        Area = Area + 2.0D0 * Weight(Cur) * WetEnergy(Cur) * PHI(J1,J2,J3) / PFGRIDSIZE
+      ENDIF
+    ENDIF
+    ENDDO
+    ENDDO
+    ENDDO
+  END SUBROUTINE COMPUTEENERGY
+
+  !Compute the second-order derivatives of the free energy density in each of the x, y and z directions
+  SUBROUTINE COMPUTEDERIVATIVES()
+    IMPLICIT NONE
+    INTEGER J1, J2, J3, J1P, J1M, J2M, J2P, Cur
+
+    DO J1 = 1, GRIDX
+    DO J2 = 1, GRIDY
+    DO J3 = 1, GRIDZ
+
+    Cur = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+
+    !Calc DGRADSQPHI for all bulk nodes, note that for surface nodes, DGRADSQPHI is only non-zero in directions parallel to the surface
+    !write(*,*) J1, J2, J3
+    !write(*,*) nodestate(J1, J2, J3)
+    IF ((nodestate(J1, J2, J3) == 0) .OR. (normlist(1,nodestate(J1,J2,J3)) == 0)) THEN
+      IF(J1 .EQ. 1) THEN
+        DGRADSQPHI(J1,J2,J3,1) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(J1+1,J2,J3))  + (PHI(J1,J2,J3)-PHI(GRIDX,J2,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,2) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1+1,J2,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+        DGRADSQPHI(J1,J2,J3,3) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(GRIDX,J2,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+      ELSEIF (J1 .EQ. GRIDX) THEN
+        DGRADSQPHI(J1,J2,J3,1) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(1,J2,J3))  + (PHI(J1,J2,J3)-PHI(J1-1,J2,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,2) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(1,J2,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+        DGRADSQPHI(J1,J2,J3,3) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1-1,J2,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+      ELSE
+        DGRADSQPHI(J1,J2,J3,1) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(J1+1,J2,J3))  + (PHI(J1,J2,J3)-PHI(J1-1,J2,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,2) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1+1,J2,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+        DGRADSQPHI(J1,J2,J3,3) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1-1,J2,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+      ENDIF
+    ENDIF
+
+    IF ((nodestate(J1, J2, J3) == 0) .OR. (normlist(2,nodestate(J1,J2,J3)) == 0)) THEN		
+      IF(J2 .EQ. 1) THEN
+        DGRADSQPHI(J1,J2,J3,1) = DGRADSQPHI(J1,J2,J3,1) + WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(J1,J2+1,J3))  + (PHI(J1,J2,J3)-PHI(J1,GRIDY,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,4) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2+1,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+        DGRADSQPHI(J1,J2,J3,5) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,GRIDY,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+      ELSEIF (J2 .EQ. GRIDY) THEN
+        DGRADSQPHI(J1,J2,J3,1) = DGRADSQPHI(J1,J2,J3,1) + WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(J1,1,J3))  + (PHI(J1,J2,J3)-PHI(J1,J2-1,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,4) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,1,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+        DGRADSQPHI(J1,J2,J3,5) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2-1,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+      ELSE
+        DGRADSQPHI(J1,J2,J3,1) = DGRADSQPHI(J1,J2,J3,1) + WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(J1,J2+1,J3))  + (PHI(J1,J2,J3)-PHI(J1,J2-1,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,4) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2+1,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+        DGRADSQPHI(J1,J2,J3,5) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2-1,J3) - PHI(J1,J2,J3)) ) / 2.0D0
+      ENDIF
+    ENDIF
+
+    IF ((nodestate(J1, J2, J3) == 0) .OR. (normlist(3,nodestate(J1,J2,J3)) == 0)) THEN
+      IF ( (J3 > 1) .AND. (J3 < GRIDZ) ) THEN !This will make all z-gradient terms at the z boundaries 0
+        DGRADSQPHI(J1,J2,J3,1) =  DGRADSQPHI(J1,J2,J3,1) + WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3) - PHI(J1,J2,J3+1))  + (PHI(J1,J2,J3)-PHI(J1,J2,J3-1)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,6) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3+1) - PHI(J1,J2,J3)) )/2.0D0
+        DGRADSQPHI(J1,J2,J3,7) =  WEIGHT(Cur) * PFepsilon / PFGRIDSIZE**2 * &
+          ( (PHI(J1,J2,J3-1) - PHI(J1,J2,J3)) )/2.0D0
+
+      ENDIF
+    ENDIF
+
+    ENDDO
+    ENDDO
+    ENDDO
+
+    RETURN
+  END SUBROUTINE COMPUTEDERIVATIVES
+
+  !Compute the free energy gradients in the x,y and z directions for force calculations
+  SUBROUTINE COMPUTEGRAD(V3, V4, V)
+    IMPLICIT NONE
+    INTEGER J1, J2, J3, J1P, J1M, J2M, J2P, Cur, Cur2
+    DOUBLE PRECISION V(N)
+    DOUBLE PRECISION V1(N), V2(N), V3(N), V4(N), V5(N), V6(N), V7(N)
+    ! WEIGHT(:), GRIDSIZE, AREACONST, VOLCONST, PFkappa, PFepsilon, CM1, CM2
+
+    !Initialise the gradient vectors
+    V(:) = 0.0D0
+    V3(:) = 0.0D0
+    V4(:) = 0.0D0
+
+    DO J1 = 1, GRIDX
+    DO J2 = 1, GRIDY
+    DO J3 = 1, GRIDZ
+    Cur = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+
+    IF (nodestate(J1, J2, J3) == 0) THEN
+      !Contribution arising from the volume-change penalty
+      V3(Cur) = V3(Cur) + 2.0D0 * CM2 * (Volume-VOLCONST) * WEIGHT(Cur)
+
+      !Contribution arising from the bulk free energy
+      V4(Cur) = V4(Cur) + WEIGHT(Cur) * PHI(J1,J2,J3)/PFepsilon * (PHI(J1,J2,J3)**2-1.0D0)
+
+      !Contribution from the second order terms of the bulk free energy using the different gradients calculated previously
+      V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3,1)
+      IF (J1 .EQ. 1)THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1+1,J2,J3,3)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(GRIDX,J2,J3,2)
+      ELSEIF (J1 .EQ. GRIDX) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(1,J2,J3,3)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1-1,J2,J3,2)
+      ELSE
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1+1,J2,J3,3)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1-1,J2,J3,2)
+      ENDIF
+
+      IF(J2 .EQ. 1) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2+1,J3,5)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,GRIDY,J3,4)
+      ELSEIF (J2 .EQ. GRIDY) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,1,J3,5)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2-1,J3,4)
+      ELSE
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2+1,J3,5)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2-1,J3,4)
+      ENDIF
+
+      IF(J3 .EQ. 1) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3+1,7)
+      ELSEIF (J3 .EQ. GRIDZ) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3-1,6)
+      ELSE
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3+1,7)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3-1,6)
+      ENDIF
+
+    ELSEIF (nodestate(J1, J2, J3) > 0) THEN
+      !Contribution arising from the volume-change penalty term
+      V3(Cur) = V3(Cur) + 2.0D0 * CM2 * (Volume-VOLCONST) * WEIGHT(Cur)
+
+      !Contribution arising from the bulk free energy
+      V4(Cur) = V4(Cur) + WEIGHT(Cur) * PHI(J1,J2,J3)/PFepsilon * (PHI(J1,J2,J3)**2-1.0D0)
+
+      !Contribution from the second order terms of the bulk free energy using the different gradients calculated previously
+      V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3,1)
+
+      IF (normlist(1,nodestate(J1,J2,J3)) < 0) THEN 
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1-1,J2,J3,2)
+
+      elseif (normlist(1,nodestate(J1,J2,J3)) > 0) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1+1,J2,J3,3)
+
+      ELSEIF (J1 .EQ. 1)THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1+1,J2,J3,3)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(GRIDX,J2,J3,2)
+      ELSEIF (J1 .EQ. GRIDX) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(1,J2,J3,3)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1-1,J2,J3,2)
+      ELSE
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1+1,J2,J3,3)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1-1,J2,J3,2)
+      ENDIF	
+
+      IF (normlist(2,nodestate(J1,J2,J3)) < 0) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2-1,J3,4)
+      ELSEIF (normlist(2,nodestate(J1,J2,J3)) > 0) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2+1,J3,5)
+      ELSEIF(J2 .EQ. 1) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2+1,J3,5)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,GRIDY,J3,4)
+      ELSEIF (J2 .EQ. GRIDY) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,1,J3,5)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2-1,J3,4)
+      ELSE
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2+1,J3,5)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2-1,J3,4)
+      ENDIF		
+
+
+      IF (normlist(3,nodestate(J1,J2,J3)) < 0) THEN !Surface term
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3-1,6)
+      ELSEIF (normlist(3,nodestate(J1,J2,J3)) > 0) THEN !Surface term
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3+1,7)
+      ELSEIF(J3 .EQ. 1) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3+1,7)
+      ELSEIF (J3 .EQ. GRIDZ) THEN
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3-1,6)
+      ELSE
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3+1,7)
+        V4(Cur) = V4(Cur) + DGRADSQPHI(J1,J2,J3-1,6)
+      ENDIF
+    ENDIF
+
+    IF ((nodestate(J1,J2,J3) > 0) .OR. (J3 == GRIDZ)) THEN
+      V4(Cur) = V4(Cur) + 2.0D0 * Weight(Cur) * WetEnergy(Cur) / PFGRIDSIZE
+
+    ENDIF
+
+    ENDDO
+    ENDDO
+    ENDDO
+
+    V(:) = V3(:) + V4(:)
+
+    RETURN
+  END SUBROUTINE COMPUTEGRAD
+
+  !Compute the energy of interaction between the droplet and the surface
+  SUBROUTINE INIPFWetting()
+    IMPLICIT NONE
+    INTEGER J1, J2, J3, Cur, S1
+    DOUBLE PRECISION PI
+    character(len=10)       :: datechar,timechar,zonechar
+    integer                 :: values(8),itime1
+
+    CALL DATE_AND_TIME(datechar,timechar,zonechar,values)
+    itime1= values(7)*39 + values(8)
+    CALL SDPRND(itime1)
+    !print *, '1'
+    CALL MAKESURFACE()
+    !print *, '2'
+    ALLOCATE(WEIGHT(N)) !Allocate memory to the allocatable WEIGHT 1d array
+
+    WEIGHT(:) = PFGRIDSIZE**3
+    PI = ATAN(1.0D0) * 4.0D0 !Define pi
+    VOLCONST = 2.0D0 * VOLCONST - GRIDX * GRIDY * GRIDZ * PFGRIDSIZE**3
+
+    ! Loop over each grid point to assign each the variable weight. Note that because element 1 and element GRIDX,Y,Z are the same, the weights associated with both is halved
+    DO J1 = 1, GRIDX
+    DO J2 = 1, GRIDY
+    DO J3 = 1, GRIDZ
+
+    Cur = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+    IF (nodestate(J1,J2,J3) > 0) THEN
+      WEIGHT(Cur) = weightlist(nodestate(J1,J2,J3))*PFGRIDSIZE**3
+    elseif (J3 == GRIDZ) THEN
+      WEIGHT(Cur) = 0.5*PFGRIDSIZE**3
+    ELSE
+      WEIGHT(Cur) = PFGRIDSIZE**3
+
+    ENDIF
+    
+
+    ENDDO
+    ENDDO
+    ENDDO
+
+    ALLOCATE(ConAngle(N), WetEnergy(N))
+    ALLOCATE(PHI(GRIDX,GRIDY,GRIDZ))
+    ALLOCATE(AREAPHI(N))
+    ALLOCATE(DGRADSQPHI(GRIDX,GRIDY,GRIDZ,7))
+    !ConAngle is the contact angle
+    !Wet energy is the surface energy density arising from the liquid drop interacting with the solid surface
+    WetEnergy(:) = 0.0D0
+    ConAngle(:) = 90.0/180.0 * ATAN(1.0D0) * 4.0D0
+    do S1 = 1, surfnodes
+
+    Cur = (surflist(1,S1)-1)*GRIDY*GRIDZ + (surflist(2,S1)-1)*GRIDZ + surflist(3,S1)
+    ConAngle(Cur) = WETCONTACT(S1)/180.0*ATAN(1.0)*4.0 !Covert contact angle in degrees to radians
+    WetEnergy(Cur) = ACOS((SIN(ConAngle(Cur)))**2)
+    WetEnergy(Cur) = COS(WetEnergy(Cur)/3.0D0)*(1.0D0-COS(WetEnergy(Cur)/3.0D0))
+    WetEnergy(Cur) = DSQRT(WetEnergy(Cur)) * DSQRT(2.0D0)
+    IF (ConAngle(Cur) < ATAN(1.0D0) * 2.0D0) THEN !observe that if the contact angle is less than 180 degrees, the wetting energy must be negative
+      WetEnergy(Cur) = WetEnergy(Cur) * (-1.0D0)
+
+    ENDIF
+
+    ENDDO
+    RETURN
+  END SUBROUTINE INIPFWETTING
+
+  !Take a random step, automatically accepting the change (basin hopping => no energy acceptance criteria)
+  SUBROUTINE TAKESTEPPFWETTING (JP)
+    IMPLICIT NONE
+    INTEGER J1, J2, J3, Cur, Cur2
+    INTEGER JP, SHIFT, RANX, RANY
+    DOUBLE PRECISION PI, DPRAND, COORDS0(GRIDX*GRIDY*GRIDZ,1), &
+      COORDS2(GRIDX*GRIDY*GRIDZ,1), COORDS3(GRIDX*GRIDY*GRIDZ,1), &
+      COORDS4(GRIDX*GRIDY*GRIDZ,1)
+    !DPRAND is a double-precision random number
+
+    OPEN(30, FILE = 'coords')
+    READ(30, *) COORDS0
+    CLOSE(30)
+
+    COORDS2 = COORDS !COORDS2 is initialised with the same phi 3d array as COORDS
+
+    !Make a random number that is 1/10 the size of the grid
+    SHIFT = GRIDX /3
+    RANX = INT( (DPRAND()-0.50D0)*SHIFT )
+
+    !If the move is in the positive x-direction:
+
+    IF (RANX > 0) THEN
+      DO J1 = 1, GRIDX-RANX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1+RANX)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP) !The phi's of the shifted elements is transfered to COORDS2
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = GRIDX-RANX+1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1+RANX-GRIDX)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ELSE
+      DO J1 = -RANX+1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1+RANX-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, -RANX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1+RANX+GRIDX-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      COORDS2(Cur2,JP) = COORDS(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ENDIF
+
+    SHIFT = GRIDY / 3
+    RANY = INT( (DPRAND()-0.50D0)*SHIFT )
+
+    IF (RANY > 0) THEN
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY-RANY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1+RANY)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = GRIDY-RANY+1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1+RANY-GRIDY)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ELSE
+      DO J1 = 1, GRIDX
+      DO J2 = -RANY+1, GRIDY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2+RANY-1)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = 1, -RANY
+      DO J3 = 1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2+RANY+GRIDY-1)*GRIDZ + J3
+      COORDS3(Cur2,JP) = COORDS2(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ENDIF
+    !This will alternatiely shift the origonal input drop up and down based on the step-number ISTEP
+
+    IF (ISTEP <= INT(MCSTEPS(1)/2)) THEN
+      SHIFT = 0
+    ELSE
+      SHIFT = 10
+    ENDIF
+    IF (SHIFT > 0) THEN
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, GRIDZ - SHIFT
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 + SHIFT
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = GRIDZ-SHIFT+1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 - GRIDZ + SHIFT
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ELSE
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = -SHIFT+1, GRIDZ
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 + SHIFT
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+      DO J1 = 1, GRIDX
+      DO J2 = 1, GRIDY
+      DO J3 = 1, -SHIFT
+      Cur  = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3
+      Cur2 = (J1-1)*GRIDY*GRIDZ + (J2-1)*GRIDZ + J3 + SHIFT + GRIDZ
+      COORDS4(Cur2,JP) = COORDS3(Cur,JP)
+      ENDDO
+      ENDDO
+      ENDDO
+    ENDIF
+
+    COORDS2 = COORDS4
+    COORDS = COORDS2
+
+    PRINT *, 'STEP ', ISTEP, ' TAKEN   DROPNODES = ', DROPNODES
+    OPEN (17, FILE = 'outputdata')
+    WRITE(17, *) VOLUME, DROPVOL, DROPNODES, AREA
+
+    OPEN(40, FILE= 'STEPCONFIG')
+    WRITE(40, '(3F14.10)') COORDS2
+    !STOP
+  END SUBROUTINE TAKESTEPPFWETTING
+
+  SUBROUTINE MAKESURFACE()
+    implicit none
+
+    !THESE WILL BE GLOBALLY DEFINED IN THE FULL PROGRAM
+    !integer GRIDX, GRIDY, GRIDZ
+    !looping indices
+    integer :: J1, J2, J3, S1, S2, P1, P2
+    !!!!!!!!!!!!!!!!!!!!!!!!!The aspect ratio (= PHEIGHT/width) will also be made global (ASPR), the width is chosen as the absolute value of the well width.
+
+    REAL :: widthx, widthy, CUR
+    integer:: xstart, xstop, ystart, ystop, PHEIGHTP, PHEIGHTS, DIR, LINESTATX, LINESTATY
+
+    !integer, allocatable :: surflist(:,:) !An array of all the node poisitions on the surface
+    !integer, allocatable :: nodestate(:,:,:) !An array of all the nodes, taking values of 1 if in the bulk, 0 otherwise
+    !real, allocatable :: normlist(:,:), weightlist(:), wetcontact(:) !An array of the normal vector at each node position and weight at each position
+    !integer surfnodes !number of surface nodes
+
+
+    !Initialise typical system variables
+    !GRIDX = 30
+    !GRIDY = 30
+    !GRIDZ = 30
+
+
+    !NPOSTX = 3
+    !NPOSTY = 3
+    !POSTFRACX = 0.6
+    !POSTFRACY = 0.6
+    !PHEIGHT = 4
+    !PFCA1 = 120
+    !PFCA2 = 120
+    !PFCA3 = 120
+    !PFCA4 = 120
+    !PFCA5 = 120
+    !PFCA6 = 120
+    WIDTHX = nint(GRIDX*POSTFRACX/NPOSTX)
+    WIDTHY = nint(GRIDY*POSTFRACY/NPOSTY)
+
+    IF (PHEIGHT < 0) THEN
+      PHEIGHT = ABS(PHEIGHT)
+      PHEIGHTP = 1
+      PHEIGHTS = PHEIGHT + 1
+      DIR = 1
+    ELSEIF (PHEIGHT > 0) THEN 
+      PHEIGHTP = PHEIGHT + 1
+      PHEIGHTS = 1
+      DIR = -1
+    ELSE
+      PHEIGHTP = 1
+      PHEIGHTS = 1
+      DIR = 0
+    ENDIF
+
+    IF (INT(POSTFRACX) >= 1) THEN
+      LINESTATX = 0
+    ELSE
+      LINESTATX = 1
+    ENDIF
+
+    IF (INT(POSTFRACY) >= 1) THEN
+      LINESTATY = 0
+    ELSE
+      LINESTATY = 1
+    ENDIF
+
+    !Calculate the total numer of nodes at the surface =(nodes spanning x-y plane + nodes in well walls)
+    surfnodes = int(NPOSTX*NPOSTY*(GRIDX*GRIDY/(NPOSTX*NPOSTY) &
+      + 2*((WIDTHX-1)+(WIDTHY-1))*ABS(PHEIGHT))) &
+      - 2*(1-LINESTATX)*(WIDTHY-2)*ABS(PHEIGHT)
+
+    allocate(surflist(3,surfnodes))
+    allocate(normlist(3,surfnodes))
+    allocate(weightlist(surfnodes))
+    allocate(Wetcontact(surfnodes))
+    allocate(nodestate(GRIDX, GRIDY, GRIDZ))
+
+    surflist(:,:) = 0
+    normlist(:,:) = 0.0
+    weightlist(:) = 0.0
+    wetcontact(:) = 0.0
+    nodestate (:,:,:) = 0
+
+
+
+    !S is the index assigning a position to each surface node coordinate in the surflist & normlist arrays
+    S1 = 1
+
+    !Begin filling surflist and normlist by only considering nodes in the x-y planes which are not the edges of the square well
+
+
+    DO P1 = 1,NPOSTX
+      DO P2 = 1, NPOSTY
+      !print *, GRIDX/NPOSTX, GRIDX/NPOSTX-widthX, (GRIDX/NPOSTX)-widthX/2, int((GRIDX/NPOSTX-widthX)/2)
+      xstart = int(((GRIDX/NPOSTX-widthX)/2) + (P1-1)*(GRIDX/NPOSTX))+1
+      xstop = int(((GRIDX/NPOSTX-widthX)/2 + widthX) + (P1-1)*(GRIDX/NPOSTX))
+      ystart = int(((GRIDY/NPOSTY-widthY)/2) + (P2-1)*(GRIDY/NPOSTY))+1
+      ystop = int(((GRIDY/NPOSTY-widthY)/2 + widthY) + (P2-1)*(GRIDY/NPOSTY))
+
+      print *, xstart, xstop, ystart, ystop
+      do J1 = (P1-1)*(GRIDX/NPOSTX)+1,P1*GRIDX/NPOSTX
+      do J2 = (P2-1)*(GRIDY/NPOSTY)+1,P2*GRIDY/NPOSTY
+
+
+      if ((J1 < xstart).OR.(J1 > xstop)) then
+        surflist(:,S1) = (/J1, J2, PHEIGHTS/)
+        normlist(:,S1) = (/0,0,1/)
+        weightlist(S1) = 0.5
+        wetcontact(S1) = PFCA1
+        nodestate(J1, J2, PHEIGHTS) = S1
+        S1 = S1+1
+
+      elseif((J2 < ystart) .OR. (J2 > ystop)) then
+        surflist(:,S1) = (/J1, J2, PHEIGHTS/)
+        normlist(:,S1) = (/0,0,1/)
+        weightlist(S1) = 0.5
+        wetcontact(S1) = PFCA1
+        nodestate(J1, J2, PHEIGHTS) = S1
+        S1 = S1+1
+
+      elseif ((J1 > xstart) .AND. (J1 < xstop))then
+        if ((J2 > ystart) .AND. (J2 < ystop)) then
+          surflist(:,S1) = (/J1, J2, PHEIGHTP/)
+          normlist(:,S1) = (/0,0,1/)
+          weightlist(S1) = 0.5
+          wetcontact(S1) = PFCA2
+          nodestate(J1, J2, PHEIGHTP) = S1
+          S1 = S1+1
+        endif
+
+      ELSEIF ((J1 == xstart) .AND. (LINESTATX == 0) .AND. (J2>ystart) .AND. (J2<ystop)) THEN
+        PRINT *, S1
+        !STOP
+        surflist(:,S1) = (/J1, J2, PHEIGHTP/)
+        normlist(:,S1) = (/0,0,1/)
+        weightlist(S1) = 0.5
+        wetcontact(S1) = PFCA2
+        nodestate(J1, J2, PHEIGHTP) = S1
+        S1 = S1+1
+
+      ELSEIF ((J1 == xstop) .AND. (LINESTATX == 0) .AND. (J2>ystart) .AND. (J2<ystop)) THEN
+        surflist(:,S1) = (/J1, J2, PHEIGHTP/)
+        normlist(:,S1) = (/0,0,1/)
+        weightlist(S1) = 0.5
+        wetcontact(S1) = PFCA2
+        nodestate(J1, J2, PHEIGHTP) = S1
+        S1 = S1+1
+
+      elseif ((J1 == xstart) .AND. (widthX == 0)) then
+        surflist(:,S1) = (/J1, J2, PHEIGHTS/)
+        normlist(:,S1) = (/0,0,1/)
+        weightlist(S1) = 0.5
+        wetcontact(S1) = PFCA1
+        nodestate(J1, J2, PHEIGHTS) = S1
+        S1 = S1+1
+
+      elseif ((J2 == ystart) .AND. (widthX == 0)) then
+        surflist(:,S1) = (/J1, J2, PHEIGHTS/)
+        normlist(:,S1) = (/0,0,1/)
+        weightlist(S1) = 0.5
+        wetcontact(S1) = PFCA1
+        nodestate(J1, J2, PHEIGHTS) = S1
+        S1 = S1+1
+
+      endif
+      enddo
+    enddo
+
+    !The next elements in surflist and normlist are those in the walls of the well
+    !S1 = int((GRIDX*GRIDY+1) - 4*width)
+
+    !Loop over all y-and z-values in the well wall at J1 = xstart
+    J1 = xstart
+    do J2 = ystart,ystop
+    do J3 = 1, PHEIGHT + 1
+
+    if (widthy /= 0) then
+      !PRINT *, LINESTATX, LINESTATY, '1'
+      surflist(:,S1) = (/J1, J2, J3/)
+      nodestate(J1, J2, J3) = S1
+      wetcontact(S1) = PFCA3
+
+
+      if (J2 == ystart) then
+        !PRINT *, S1
+        !STOP
+        if (J3 == 1)  then
+          normlist(:,S1) = (/LINESTATX*DIR,DIR,1/)
+          weightlist(S1) = 0.5-abs(DIR)*(0.25+LINESTATX*DIR*0.125)
+        elseif (J3 == PHEIGHT+1) then
+          normlist(:,S1) = (/LINESTATX*DIR,DIR,1/)
+          weightlist(S1) = 0.75-LINESTATX*DIR*0.125 !Note that this weightlist value is not true for DIR=0, but the 'ifs' should select out this case 
+        else
+          normlist(:,S1) = (/LINESTATX*DIR,DIR,0/)
+          weightlist(S1) = 0.5-LINESTATX*DIR*0.25 !Note that this weightlist value is not true for DIR=0, but the 'ifs' should select out this case 
+        endif
+        S1 = S1+1
+
+      elseif (J2 == ystop) then
+
+        if (J3 == 1) then
+          normlist(:,S1) = (/LINESTATX*DIR,-DIR,1/)
+          weightlist(S1) = 0.5-abs(DIR)*(0.25+LINESTATX*DIR*0.125)
+        elseif (J3 == PHEIGHT+1) then
+          normlist(:,S1) = (/LINESTATX*DIR,-DIR,1/)
+          weightlist(S1) = 0.75-DIR*0.125
+        else
+          normlist(:,S1) = (/LINESTATX*DIR,-DIR,0/)
+          weightlist(S1) = 0.5-LINESTATX*DIR*0.25
+        endif
+        S1 = S1+1
+
+      elseif ((J3 == 1) .AND. (LINESTATX == 1)) then
+
+        normlist(:,S1) = (/DIR,0,1/)
+        weightlist(S1) = 0.5-ABS(DIR)*0.25
+        S1 = S1+1
+
+      elseif ((J3 == PHEIGHT+1) .AND. (LINESTATX == 1)) then
+
+        normlist(:,S1) = (/DIR,0,1/)
+        weightlist(S1) = 0.5+ABS(DIR)*0.25
+        S1 = S1+1
+      elseif  (LINESTATX == 1) then
+
+        normlist(:,S1) = (/DIR,0,0/)
+        weightlist(S1) = 0.5
+        S1 = S1+1
+      endif
+
+
+
+
+    endif
+    enddo
+    enddo
+
+    !Loop over all y-and z-values in the well wall at J1 = xstop
+    J1 = xstop
+    do J2 = ystart,ystop
+    do J3 = 1, PHEIGHT + 1
+
+    if (widthy /= 0) then
+      surflist(:,S1) = (/J1, J2, J3/)
+      nodestate(J1, J2, J3) = S1
+      wetcontact(S1) = PFCA4
+
+      if (J2 == ystart) then
+
+        if (J3 == 1) then
+          normlist(:,S1) = (/-LINESTATX*DIR,DIR,1/)
+          weightlist(S1) = 0.5-abs(DIR)*(0.25+LINESTATX*DIR*0.125)
+        elseif (J3 == PHEIGHT+1) then
+          normlist(:,S1) = (/-LINESTATX*DIR,DIR,1/)
+          weightlist(S1) = 0.75-LINESTATX*DIR*0.125
+        else
+          normlist(:,S1) = (/-LINESTATX*DIR,DIR,0/)
+          weightlist(S1) = 0.5-LINESTATX*DIR*0.25
+        endif
+        S1 = S1+1
+      elseif (J2 == ystop)then
+
+        if (J3 == 1) then
+          normlist(:,S1) = (/-LINESTATX*DIR,-DIR,1/)
+          weightlist(S1) = 0.5-abs(DIR)*(0.25+LINESTATX*DIR*0.125)
+        elseif (J3 == PHEIGHT+1) then
+          normlist(:,S1) = (/-LINESTATX*DIR,-DIR,1/)
+          weightlist(S1) = 0.75-LINESTATX*DIR*0.125
+        else
+          normlist(:,S1) = (/-LINESTATX*DIR,-DIR,0/)
+          weightlist(S1) = 0.5-LINESTATX*DIR*0.25
+        endif
+        S1 = S1+1
+      elseif ((J3 == 1) .AND. (LINESTATX == 1)) then
+        normlist(:,S1) = (/-DIR,0,1/)
+        weightlist(S1) = 0.5-ABS(DIR)*0.25
+        S1 = S1+1
+      elseif ((J3 == PHEIGHT+1) .AND. (LINESTATX == 1)) then
+        normlist(:,S1) = (/-DIR,0,1/)
+        weightlist(S1) =0.5+ABS(DIR)*0.25
+        S1 = S1+1
+      elseif  (LINESTATX == 1) then
+        normlist(:,S1) = (/-DIR,0,0/)
+        weightlist(S1) = 0.5
+        S1 = S1+1
+      endif
+
+
+
+    ENDIF
+    enddo
+    enddo
+
+    J2 = ystart
+    do J1 = xstart+1,xstop-1
+    do J3 = 1, PHEIGHT + 1
+
+    if (widthx /=0) then
+      surflist(:,S1) = (/J1, J2, J3/)
+      nodestate(J1, J2, J3) = S1
+      wetcontact(S1) = PFCA5
+
+      if (J3 == 1) then
+        normlist(:,S1) = (/0,DIR,1/)
+        weightlist(S1) = 0.5-ABS(DIR)*0.25
+      elseif (J3 == PHEIGHT+1) then
+        normlist(:,S1) = (/0,DIR,1/)
+        weightlist(S1) = 0.5+ABS(DIR)*0.25
+      else
+        normlist(:,S1) = (/0,DIR,0/)
+        weightlist(S1) = 0.5
+      endif
+      S1 = S1+1
+    endif
+    enddo
+    enddo
+
+    J2 = ystop
+    do J1 = xstart+1,xstop-1
+    do J3 = 1, PHEIGHT + 1
+
+    IF (WIDTHx /=0) THEN
+      surflist(:,S1) = (/J1, J2, J3/)
+      nodestate(J1, J2, J3) = S1
+      wetcontact(S1) = PFCA6
+
+      if (J3 == 1) then
+        normlist(:,S1) = (/0,-DIR,1/)
+        weightlist(S1) = 0.5-ABS(DIR)*0.25
+
+      elseif (J3 == PHEIGHT+1) then
+        normlist(:,S1) = (/0,-DIR,1/)
+        weightlist(S1) = 0.5+ABS(DIR)*0.25
+
+      else
+        normlist(:,S1) = (/0,-DIR,0/)
+        weightlist(S1) = 0.5
+      endif
+      S1 = S1+1
+    ENDIF
+    enddo
+    enddo
+
+    ENDDO
+    ENDDO
+    !Label each grid point with a '0' if in the bulk, '-1' if below the surface (not to take part in the calculation) &
+    ! the positive index value of the node in surflist if the node is at the surface.
+
+    DO J1 = 1,GRIDX
+    DO J2 = 1,GRIDY
+    DO J3 = 1,GRIDZ
+    IF (J3 == 1) THEN
+
+    ELSEIF ((nodestate(J1, J2, J3) > 0) .AND. (nodestate(J1, J2, J3-1) == 0)) then
+      DO S2 = 1, surflist(3,nodestate(J1,J2,J3))-1
+      nodestate(J1, J2, S2) = -1
+      ENDDO
+    ENDIF
+    ENDDO
+    ENDDO
+    ENDDO
+
+    open(12, file = 'nodestate2')
+    write(12,'(30I5)') nodestate
+    close(12)
+
+    open(10, file = 'surflist2')
+    write(10,'(3I5)') surflist
+    close(10)
+
+    open(11, file = 'normlist2')
+    write(11,'(3I5)') normlist
+    close(11)
+  END SUBROUTINE MAKESURFACE
+END MODULE potential

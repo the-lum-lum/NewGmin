@@ -1,0 +1,141 @@
+#/bin/bash
+# This script will make a series of runs 
+
+#----------------------------------------------------------------------------------------------------------------
+# 1) User input variables and arrays
+#----------------------------------------------------------------------------------------------------------------
+  N_ROD=10	
+  N_SEG=200
+  L=5
+  H=1
+  K3=0.0001
+  LOWER_RAT=1.0
+
+ F_I_ARRAY=($(seq 0.0 0.005 0.1))
+ F_S_ARRAY=($(seq 0.0 0.0005 0.004))
+ BE_ARRAY=(0.01 0.05 0.22 1.0 4.0 20.0 100.0)
+
+  #F_I_ARRAY=($(seq 0.06 0.01 4.0))
+  #F_S_ARRAY=($(seq 0.0 0.0005 0.0))
+  #BE_ARRAY=(100.0)
+  K3_ARRAY=(0.0001)
+
+  USE_EXAMPLES=true # This is 'true' if we want the outputs of previous runs to be the inputs in our new runs
+  N_TYPES=4 # This is the number of different initialisations to try.
+
+  RAND_MAG=0.05 # The magnitude of random angular displacements to make to coords not read in from the examples folder
+#----------------------------------------------------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------------------------------------------------
+# 2) Initialise
+#----------------------------------------------------------------------------------------------------------------
+# 2.1) Compute looping array sizes
+  SIZE_FI=${#F_I_ARRAY[@]}
+  SIZE_FS=${#F_S_ARRAY[@]}
+  SIZE_BE=${#BE_ARRAY[@]}
+  SIZE_K3=${#K3_ARRAY[@]}
+
+# 2.2) Compile software
+  gfortran -o bin/init_rods utils/init_rods.f90
+  ./../../GMIN -n
+
+# 2.3) Make the current run folder
+  foldername=lamina_NROD''$N_ROD''_NSEG_''$N_SEG''_RAT''$L''
+  if [ ! -d $foldername ]; then
+	mkdir $foldername
+  fi
+
+# 2.4) Add header to data_log if not already there
+  if [ ! -d $foldername/data_log ]; then
+	echo 'F_I  F_S  BE  ITYPE  ENERGY' > $foldername/data_log
+  fi
+#----------------------------------------------------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------------------------------------------------
+# 3) Useful functions
+#----------------------------------------------------------------------------------------------------------------
+  function write_data {
+	# Write the data.in file to be read by data.f90
+ 	echo $N_ROD > data.in
+  	echo $N_SEG >> data.in
+  	echo $L >> data.in
+  	echo $H >> data.in
+  	echo $K3 >> data.in
+  	echo $LOWER_RAT >> data.in
+  	echo $F_I >> data.in
+  	echo $F_S >> data.in
+  	echo $BE >> data.in
+  	echo $RAND_MAG >> data.in
+  }
+
+  function get_energy {
+	# Extract the energy from the lowest file
+	LINE=$(grep -i energy lowest)
+	ENERGY=$(echo $LINE | awk '{print $3}')
+	ENERGY=$(printf "%.10f\n" $ENERGY)
+  }
+#----------------------------------------------------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------------------------------------------------
+# 4) Perform the minimisations
+#----------------------------------------------------------------------------------------------------------------
+cd $foldername
+COUNTER=0
+NRUNS=$(($SIZE_FI*$SIZE_FS*$SIZE_BE*$N_TYPES*$SIZE_K3))
+for F_I in "${F_I_ARRAY[@]}"
+do
+	for F_S in "${F_S_ARRAY[@]}"
+	do
+		for BE in "${BE_ARRAY[@]}"
+		do
+     for K3 in "${K3_ARRAY[@]}"
+		 do
+			for ITYPE in `seq 1 $N_TYPES`
+			do
+				COUNTER=$(($COUNTER+1))
+				echo 'Run' $COUNTER 'of' $NRUNS 'F_I=' $F_I 'F_S=' $F_S 'BE=' $BE 'IYPE=' $ITYPE 'K3=' $K3
+
+				#4.1) Make a run folder
+				runname=''$F_I''F_S''$F_S''K3''$K3''BsRat''$LOWER_RAT''Obc''$BE''_''$ITYPE''
+				if [ ! -d $runname ]; then
+					mkdir $runname
+ 				else
+					echo 'Run folder' $runname 'already exists, skipping'
+				fi
+
+				#4.2) Initialise the run folder with standard random angles
+				cd $runname
+				cp ../../gmin .
+				write_data
+				cp ../../data.f90 .
+				./../../bin/init_rods
+
+				#4.3) If previous examples are used as inputs, copy them to coords
+				if [ $USE_EXAMPLES = true ]; then
+					if [ $ITYPE -eq 2 ]; then
+						cp ../../example_coords/coords_global ./coords
+					elif [ $ITYPE -eq 3 ]; then
+						cp ../../example_coords/coords_auxetic ./coords
+					elif [ $ITYPE -eq 4 ]; then
+						cp ../../example_coords/coords_internal ./coords
+					fi
+				fi
+
+				#4.4) Run gmin
+				./gmin
+
+				#4.5) Process the results and store in data_log
+				get_energy
+				echo $F_I $F_S $BE $K3E $ITYPE $ENERGY >> ../data_log
+
+				cd ../ 																				 
+        done
+			done
+		done
+	done		
+done
+cd ../
+#----------------------------------------------------------------------------------------------------------------

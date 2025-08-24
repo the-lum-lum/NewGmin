@@ -1,0 +1,134 @@
+!lamina_new_clamped
+subroutine set_defaults()
+  use potential
+  IMPLICIT NONE
+  DOUBLE PRECISION :: alpha
+  !#################!
+  ! User Parameters !
+  !#################!
+
+  CM1 = 1.0D3 !Energy scale factor
+ ! Read B_ARRAY from external file
+
+
+  OPEN(1,FILE='data.in')
+  READ(1,*) N_ROD
+  READ(1,*) N_SEG
+  READ(1,*) L
+  READ(1,*) H
+  READ(1,*) K3
+  READ(1,*) LOWER_RAT
+  READ(1,*) F_I
+  READ(1,*) F_S
+  READ(1,*) BE
+  CLOSE(1)
+
+!SUBROUTINE load_b_array(B_ARRAY, N_ROD, N_SEG)
+  !  IMPLICIT NONE
+  !  DOUBLE PRECISION, INTENT(INOUT) :: B_ARRAY(:,:)
+  !  INTEGER, INTENT(IN) :: N_ROD, N_SEG
+  !  INTEGER :: i, j
+  
+  !  OPEN(2, FILE='b_array.dat', STATUS='OLD')
+  ! DO i = 1, N_ROD
+  !    READ(2, *) (B_ARRAY(i, j), j = 1, N_SEG)
+  !  END DO
+  !  CLOSE(2)
+  !  WRITE(*, *) "B_ARRAY successfully loaded from b_array.dat"
+!END SUBROUTINE load_b_array
+   
+
+  
+
+
+  R3=H/(N_ROD-1.0) !LC spring equilibrium length
+  
+  K1=K3 !Vertical spring stiffness
+  R1=H/(N_ROD-1.0) !Vertical spring equilibrium length
+
+  K2=K3  !Diagonal spring stiffness
+  R2=SQRT( (L/N_SEG)**2 + (H/(N_ROD-1.0))**2 )  !Diagonal spring equilibrium length
+  
+  ALLOCATE(B_ARRAY(N_ROD,N_SEG))
+  ! Read B_ARRAY from external file
+
+
+  !CALL load_b_array(B_ARRAY, N_ROD, N_SEG)
+  !SUBROUTINE load_b_array()
+  !  IMPLICIT NONE
+  !  INTEGER :: i, j
+  !  OPEN(2, FILE='b_array.dat', STATUS='OLD')
+  !  DO i = 1, N_ROD
+  !    READ(2,*) (B_ARRAY(i, j), j = 1, N_SEG)
+  !  END DO
+  !  CLOSE(2)
+  !  WRITE(*,*) "B_ARRAY successfully loaded from b_array.dat"
+  !END SUBROUTINE load_b_array
+  
+  DO i=1,N_SEG
+    B_ARRAY(1,i)=0.1
+    B_ARRAY(N_ROD,i)=0.1
+  END DO
+  
+  !DO i = 2, N_ROD-1
+  !  DO j = 1, N_SEG
+  !    D = 1.0 - (j-1.0) / (N_SEG) * 0.9  ! 0.9 decay across all segments
+  !    B_ARRAY(i, j) = B_ARRAY(i, j) * D
+  !  END DO
+  !END DO
+
+  
+  !alpha = 5.0  ! Adjust alpha to control decay rate
+  !DO i = 2, N_ROD-1
+  !  DO j = 1, N_SEG
+  !    B_ARRAY(i, j) = B_ARRAY(i, j) * (EXP(-alpha * (j-1.0) / (N_SEG )))
+  !  END DO
+  !END DO
+
+  DO j = 1, N_SEG
+    DO i = 2, N_ROD-1
+      f_i = 1 - ((2.0 * i - (N_ROD-1)) / (N_ROD-1))**2
+      B_ARRAY(i, j) = (0.01 - 0.01 * (j-1) / N_SEG) * f_i
+    END DO
+  END DO
+  
+  !DO i=2,N_ROD-1
+  !  IF (MOD(i,2)==0) THEN
+  !   B_ARRAY(i)=0.01 !Interior rod bending stiffness type1
+  ! ELSE
+  !   B_ARRAY(i)=0.01*LOWER_RAT !Interior rod bending stiffness type2
+  ! END IF
+  !END DO
+
+  KC=100000.0 !End constraint magnitude
+  KY=10.0 !Overlap penalisation magnitude
+  WY=0.001 !Overlap penalisation onset width
+
+  KAREA=1.0D6 !Repulsion magnitude
+  CAREA=100.0 !Repulsion exponential factor
+
+
+  N = (N_ROD)*(N_SEG-1)
+  !###################!
+  ! L-BFGS Parameters !
+  !###################!
+
+  M = 10
+  max_iterations  = 1000000 !Max number of minimisation steps
+  convergence_rms = 1d-5 !RMS gradient at convergence
+  max_step_size   = 0.25d0
+  H0init          = 1d-1
+  relative_energy_check = .true.
+  dE_max          = 1d-1
+  debug = .true.
+
+  !##########################!
+  ! Basin Hopping Parameters !
+  !##########################!
+
+  max_runs          = 1
+  max_similarity    = 1d-4
+  temperature       = 1000d4
+  binary_io         = .false.
+  minima_save_limit = 0
+end subroutine set_defaults
