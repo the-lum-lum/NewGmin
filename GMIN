@@ -1,0 +1,102 @@
+#!/bin/bash
+
+#
+# Compile the GMIN code.
+#
+# There are three main sections involved: firstly, the core files, these are
+# the black box of the minimiser and should not need to be modified by the
+# user.
+#
+# The second section allows us to override the builtin functions,
+# potential, take_step, ...
+# on a case by case basis. To do this, place the files with the same name
+# in a folder in the GMIN directory, then give the name in a comment at
+# the top of the data file.
+#
+# Finally, we have two local files, these are the coordinates for the run
+# and the data file that declares the variables and assigns the values for that run,
+# including overwriting the global variables.
+# These files should be in the directory from which we call this script GMIN.
+
+# Give the path of this script, this is use to link to the core files
+gmin_path="$(dirname $(readlink -f "$0"))"/
+core=${gmin_path}/source/core/
+user=$(pwd)/
+
+
+OPTIND=1
+run_mode="norm"
+compiler="gfortran"
+
+while getopts "hcdnbm" opt; do
+  case "$opt" in
+    h)
+      # Show help
+      echo "this is some help"
+      exit 0
+      ;;
+    c)
+      echo "Starting clean run"
+      rm ${gmin_path}/source/obj/*.mod
+      ;;
+    d)
+      echo "Running in debug mode"
+      echo "run gprof gmin gmon.out to see results after completion"
+      debug_flag="-pg"
+      ;;
+    b)
+      echo "Benchmarking run"
+      run_mode="benchmark"
+      ;;
+    n)
+      echo "Don't run the executable after creation"
+      run_mode="no_run"
+      ;;
+    m) 
+      echo "MPI Mode"
+      compiler="mpi"
+      run_mode="mpi"
+      ;;
+    esac
+done
+
+# Read the first line of the data file, from this search
+# for the directory in the GMIN directory
+# TODO: This works, but is awful
+#override_name=$(head data.f90 -n 1 | tail -c +2)
+override=$(find $gmin_path/source/ -iname $override_name -type d)/
+
+echo "here"
+echo ${override}potential.f90
+echo $override_name
+
+# Go through the possible override files.
+# if they are present we compile them instead
+# maybe grep them for module potential or function names?
+
+if [ -f gmin ]; then
+  rm gmin
+fi
+
+# Compile
+
+
+${compiler} -O2 ${debug_flag} -mcmodel=medium \
+  ${core}dprand.f ${core}global_variables.f90 /mnt/c/Users/callu/Documents/NewGmin/source/override/lamina_new/potential.f90 \
+  ${core}input_output.f90 ${core}bfgs_maths.f90 ${user}data.f90 \
+  ${core}bfgs_logic.f90 ${core}basin_hopping.f90 \
+  ${core}test.f90 -o gmin -J${gmin_path}/source/obj
+
+case "$run_mode" in
+  no_run)
+    exit 0
+    ;;
+  benchmark)
+    perf stat -B -e cache-references,cache-misses,branches,branch-misses,faults,minor-faults,major-faults,cpu-clock ./gmin
+    ;;
+  mpi)
+    mpirun -np 4 ./gmin
+    ;;
+  *)
+    ./gmin
+esac
