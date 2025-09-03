@@ -30,7 +30,7 @@ This project investigates the mechanical instabilities of the **optic nerve bund
 ## How to Run
 1. Clone this repository:  
    ```bash
-   git clone https://github.com/the-lum-lum/NewGmin.git
+   git clone https://github.com/callumpatel1/NewGmin.git
 2. Compile and run Fortran minimisation code using the provided shell script:
    ./make_runs.sh
 3. Apply Python damage/recovery rules:
@@ -45,3 +45,4 @@ Python scripts generate:
 
 ##License
 This repository is for academic and research purposes. Please contact the author before reuse.
+
